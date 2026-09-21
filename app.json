@@ -1,35 +1,30 @@
 {
   "expo": {
     "name": "FixNext",
-    "slug": "FixNext",
+    "slug": "fixnext",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/FixNext_logo.png",
-    "splash": {
-      "image": "./assets/FixNext_logo.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "scheme": "fixnext",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/FixNext_logo.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/FixNext_logo.png"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "package": "com.vasudev3107.fixnext"
     },
+
     "web": {
       "output": "static",
       "favicon": "./assets/FixNext_logo.png"
     },
+
     "plugins": [
       "expo-router",
       [
@@ -49,9 +44,17 @@
       "expo-status-bar",
       "expo-web-browser"
     ],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f246f56f-5513-4d8b-9f39-7b03403f1451"
+      }
     }
   }
 }

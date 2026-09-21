@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { useAuth } from "./AuthContext";
+import { authFetch } from "../src/api";
 
 
 export interface AppNotification {
@@ -24,8 +25,7 @@ interface NotificationsContextType {
 
 const NotificationsContext = createContext<NotificationsContextType | undefined>(undefined);
 
-// Replace with your actual backend IP or 10.0.2.2 for Android emulator
-const API_BASE_URL = "http://localhost:3000"; 
+// No base URL here, use authFetch instead
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
     const { user, isReady } = useAuth();
@@ -37,11 +37,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         if (!user || !user.phone) return;
         try {
             // We use user.phone as a pseudo userId for now
-            const res = await fetch(`${API_BASE_URL}/api/notifications?userId=${user.phone}`);
-            const data = await res.json();
-            if (data.success) {
-                setNotifications(data.notifications);
-            }
+            const data = await authFetch(`/notifications?userId=${user.phone}`);
+            setNotifications(data.notifications || []);
         } catch (error) {
             console.log("[NotificationsContext] Error fetching notifications:", error);
         }
@@ -50,16 +47,12 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const markAsRead = async () => {
         if (!user || !user.phone || unreadCount === 0) return;
         try {
-            const res = await fetch(`${API_BASE_URL}/api/notifications/read`, {
+            const data = await authFetch(`/notifications/read`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: user.phone })
             });
-            const data = await res.json();
-            if (data.success) {
-                // Optimistically update local state
-                setNotifications(prev => prev.map(n => ({ ...n, isRead: 1 })));
-            }
+            // Optimistically update local state
+            setNotifications(prev => prev.map(n => ({ ...n, isRead: 1 })));
         } catch (error) {
             console.log("[NotificationsContext] Error marking notifications as read:", error);
         }

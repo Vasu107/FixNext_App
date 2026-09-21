@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { authFetch } from "../src/api";
 
 export type BookingStatus = "Upcoming" | "Completed" | "Cancelled";
 export type JobStatus = "New" | "Accepted" | "En Route" | "Arrived" | "In Progress" | "Completed" | "Rejected";
@@ -53,17 +54,54 @@ const generateOtp = () => String(Math.floor(1000 + Math.random() * 9000));
 export function BookingsProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
 
-  const addBooking = (booking: Omit<Booking, "jobStatus" | "customerName">) => {
-    setBookings((prev) => [
-      { ...booking, jobStatus: "New", customerName: randomName() },
-      ...prev,
-    ]);
+  useEffect(() => {
+    fetchBookings();
+  }, []);
+
+  const fetchBookings = async () => {
+    try {
+      const data = await authFetch('/bookings');
+      // Format backend data to match frontend types if needed
+      setBookings(data.bookings || []);
+    } catch (error) {
+      console.log("[BookingsContext] Error fetching bookings:", error);
+    }
   };
 
-  const updateStatus = (bookingId: string, status: BookingStatus) => {
-    setBookings((prev) =>
-      prev.map((b) => (b.bookingId === bookingId ? { ...b, status } : b))
-    );
+  const addBooking = async (booking: Omit<Booking, "jobStatus" | "customerName">) => {
+    try {
+      const data = await authFetch('/bookings', {
+        method: 'POST',
+        body: JSON.stringify(booking)
+      });
+      if (data.booking) {
+         setBookings((prev) => [data.booking, ...prev]);
+      }
+    } catch (error) {
+       console.log("[BookingsContext] Error creating booking:", error);
+       // Fallback for demo
+       setBookings((prev) => [
+         { ...booking, jobStatus: "New", customerName: randomName() },
+         ...prev,
+       ]);
+    }
+  };
+
+  const updateStatus = async (bookingId: string, status: BookingStatus) => {
+    try {
+      await authFetch(`/bookings/${bookingId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
+      });
+      setBookings((prev) =>
+        prev.map((b) => (b.bookingId === bookingId ? { ...b, status } : b))
+      );
+    } catch (error) {
+       console.log("[BookingsContext] Error updating status:", error);
+       setBookings((prev) =>
+         prev.map((b) => (b.bookingId === bookingId ? { ...b, status } : b))
+       );
+    }
   };
 
   const updateJobStatus = (bookingId: string, jobStatus: JobStatus) => {

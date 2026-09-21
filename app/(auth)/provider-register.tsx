@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "@/context/AuthContext";
+import { BASE_URL } from "@/src/api";
 
 const BLUE = "#2B719E";
 const LIGHT_BLUE = "#EBF3F8";
@@ -84,6 +85,7 @@ export default function ProviderRegister() {
   const [fullName, setFullName]     = useState("");
   const [phone, setPhone]           = useState("");
   const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
   const [city, setCity]             = useState("");
 
   // Step 2: Categories
@@ -107,6 +109,7 @@ export default function ProviderRegister() {
   const validateStep1 = () => {
     if (!fullName.trim()) { Alert.alert("Required", "Please enter your full name."); return false; }
     if (phone.trim().length < 10) { Alert.alert("Required", "Please enter a valid phone number."); return false; }
+    if (password.trim().length < 8) { Alert.alert("Required", "Password must be at least 8 characters."); return false; }
     if (!city.trim()) { Alert.alert("Required", "Please enter your city."); return false; }
     return true;
   };
@@ -147,11 +150,33 @@ export default function ProviderRegister() {
         ["provider_verified",      "false"],  // awaiting admin verification
       ]);
 
-      // Login as provider — dashboard RBAC guard will let them through
-      await login("provider", fullName, phone);
+      const payload = {
+        name: fullName.trim(),
+        email: email.trim() || fullName.trim().replace(/\s/g, '').toLowerCase() + '@example.com',
+        phone: phone.trim(),
+        password,
+        bio,
+        experience,
+        city,
+        categories: selectedCats
+      };
+
+      const response = await fetch(`${BASE_URL}/auth/register/provider`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Registration failed");
+      }
+
+      await AsyncStorage.setItem("token", data.token);
+      await login("provider", data.user.name, data.user.phone);
       setStep(4); // show pending verification screen
-    } catch (e) {
-      Alert.alert("Error", "Something went wrong. Please try again.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -272,6 +297,14 @@ export default function ProviderRegister() {
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
+              />
+              <InputField
+                label="Password"
+                icon="lock-closed-outline"
+                placeholder="••••••••"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={true}
               />
               <InputField
                 label="City"
@@ -429,7 +462,7 @@ export default function ProviderRegister() {
 // REUSABLE INPUT FIELD
 // ─────────────────────────────────────────────────────────────
 function InputField({
-  label, icon, placeholder, value, onChangeText, keyboardType, maxLength,
+  label, icon, placeholder, value, onChangeText, keyboardType, maxLength, secureTextEntry
 }: {
   label: string;
   icon: string;
@@ -438,6 +471,7 @@ function InputField({
   onChangeText: (text: string) => void;
   keyboardType?: "default" | "phone-pad" | "email-address";
   maxLength?: number;
+  secureTextEntry?: boolean;
 }) {
   return (
     <View style={styles.fieldWrapper}>
@@ -453,6 +487,7 @@ function InputField({
           keyboardType={keyboardType ?? "default"}
           maxLength={maxLength}
           autoCapitalize={keyboardType === "email-address" ? "none" : "words"}
+          secureTextEntry={secureTextEntry}
         />
       </View>
     </View>

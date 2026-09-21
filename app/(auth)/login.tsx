@@ -10,12 +10,36 @@ import {
   Platform,
   Alert,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth, UserRole } from "@/context/AuthContext";
+import { BASE_URL } from "@/src/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Google from "expo-auth-session/providers/google";
+import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
+
+// Complete the web auth session so the browser closes after redirect
+WebBrowser.maybeCompleteAuthSession();
 
 const BLUE = "#0758C9";
+
+// ─── Google OAuth Config ──────────────────────────────────────────────────────
+// On Android, expo-auth-session requires androidClientId.
+// Fallback to web clientId so the hook never crashes when only one ID is set.
+const GOOGLE_WEB_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || "not-configured";
+const GOOGLE_ANDROID_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || GOOGLE_WEB_ID;
+const GOOGLE_IOS_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || GOOGLE_WEB_ID;
+
+// Expo auth proxy redirect URI — must be added to Google Cloud Console
+// Authorized redirect URIs: https://auth.expo.io/@vasudev123/fixnext
+const REDIRECT_URI = AuthSession.makeRedirectUri({
+  scheme: "fixnext",
+});
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -24,6 +48,23 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // ── Google OAuth setup ──────────────────────────────────────────────────────
+  // All three platform IDs are provided so the hook never throws on any platform
+  // Google provider already includes its discovery document internally — no second arg needed
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    clientId: GOOGLE_WEB_ID,
+    androidClientId: GOOGLE_ANDROID_ID,
+    iosClientId: GOOGLE_IOS_ID,
+    scopes: ["openid", "profile", "email"],
+    redirectUri: REDIRECT_URI,
+  });
+
+  /** True only when real credentials have been configured */
+  const isGoogleConfigured =
+    GOOGLE_WEB_ID !== "not-configured" &&
+    GOOGLE_WEB_ID !== "YOUR_GOOGLE_WEB_CLIENT_ID_HERE";
 
   const handleSignIn = async () => {
     if (!email.trim()) {
@@ -36,26 +77,44 @@ export default function LoginScreen() {
     }
 
     try {
-      /*
-       * ----------------------------------------
-       * CONNECT YOUR REAL LOGIN API HERE
-       * ----------------------------------------
-       * When your API returns, it should also return the user's role.
-       * Then call: await loginAs(role);
-       */
+      const response = await fetch(`${BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
 
-      // Default to customer login (no real backend yet)
-      await loginAs("customer");
-    } catch (error) {
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Invalid credentials");
+      }
+
+      await AsyncStorage.setItem("token", data.token);
+      await loginAs(
+        data.user.role as UserRole,
+        data.user.name,
+        data.user.phone,
+        data.user.email
+      );
+    } catch (error: any) {
       console.log("Login error:", error);
-      Alert.alert("Login Failed", "Something went wrong. Please try again.");
+      Alert.alert("Login Failed", error.message || "Something went wrong. Please try again.");
     }
   };
 
   // Helper: saves login info and routes to the correct dashboard
-  const loginAs = async (role: UserRole) => {
+  const loginAs = async (
+    role: UserRole,
+    name?: string,
+    phone?: string,
+    email?: string,
+    avatar?: string,
+    authProvider?: string
+  ) => {
     try {
-      await login(role);
+      await login(role, name, phone, email, avatar, authProvider);
       // Navigate to the correct dashboard based on role
       if (role === "admin") {
         router.replace("/(admin)" as any);
@@ -71,11 +130,60 @@ export default function LoginScreen() {
   };
 
 
-  const handleGoogleLogin = () => {
-    Alert.alert(
-      "Google Login",
-      "Google authentication will be connected here."
-    );
+  const handleGoogleLogin = async () => {
+    if (!isGoogleConfigured) {
+      Alert.alert(
+        "Setup Required",
+        "Google Sign-In is not configured yet.\n\nAdd your Google Client IDs to:\n• FixNext/.env\n• server/.env\n\nSee implementation plan for steps."
+      );
+      return;
+    }
+
+    try {
+      setGoogleLoading(true);
+      const result = await promptAsync();
+
+      if (result?.type === "success") {
+        const idToken = result.params?.id_token ?? result.authentication?.idToken;
+
+        if (!idToken) {
+          throw new Error("Google did not return an ID token. Ensure openid scope is requested.");
+        }
+
+        // Send idToken to our backend for verification & user upsert
+        const serverResponse = await fetch(`${BASE_URL}/auth/google`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+
+        const data = await serverResponse.json();
+
+        if (!serverResponse.ok || !data.success) {
+          throw new Error(data.error || "Google login failed on server");
+        }
+
+        // Store JWT and log in
+        await AsyncStorage.setItem("token", data.token);
+        await loginAs(
+          data.user.role as UserRole,
+          data.user.name,
+          data.user.phone,
+          data.user.email,
+          data.user.avatar,
+          data.user.authProvider
+        );
+      } else if (result?.type === "cancel" || result?.type === "dismiss") {
+        // User cancelled — do nothing
+      } else if (result?.type === "error") {
+        throw new Error(result.error?.message || "Google sign-in failed");
+      }
+    } catch (error: any) {
+      console.log("Google login error:", error);
+      Alert.alert("Google Login Failed", error.message || "Something went wrong. Please try again.");
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   const handleCreateAccount = () => {
@@ -215,16 +323,19 @@ export default function LoginScreen() {
 
           {/* Google */}
           <TouchableOpacity
-            style={styles.googleButton}
+            style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]}
             onPress={handleGoogleLogin}
             activeOpacity={0.8}
+            disabled={googleLoading || !request}
           >
-            <Text style={styles.googleIcon}>
-              G
-            </Text>
+            {googleLoading ? (
+              <ActivityIndicator size="small" color="#4285F4" style={{ marginRight: 10 }} />
+            ) : (
+              <Text style={styles.googleIcon}>G</Text>
+            )}
 
             <Text style={styles.googleText}>
-              Continue with Google
+              {googleLoading ? "Signing in..." : "Continue with Google"}
             </Text>
           </TouchableOpacity>
 
@@ -243,30 +354,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Demo Login Buttons */}
-          <View style={styles.demoContainer}>
-            <Text style={styles.demoTitle}>— Demo Login (Dev Only) —</Text>
-            <View style={styles.demoRow}>
-              <TouchableOpacity
-                style={[styles.demoBtn, { backgroundColor: "#0758C9" }]}
-                onPress={() => loginAs("customer")}
-              >
-                <Text style={styles.demoBtnText}>👤 Customer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.demoBtn, { backgroundColor: "#1A6B4A" }]}
-                onPress={() => loginAs("provider")}
-              >
-                <Text style={styles.demoBtnText}>🔧 Provider</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.demoBtn, { backgroundColor: "#E94560" }]}
-                onPress={() => loginAs("admin")}
-              >
-                <Text style={styles.demoBtnText}>🔒 Admin</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
 
         </View>
       </KeyboardAvoidingView>
@@ -459,6 +546,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  googleButtonDisabled: {
+    opacity: 0.6,
+    backgroundColor: "#F5F5F5",
+  },
+
   googleIcon: {
     fontSize: 20,
     fontWeight: "800",
@@ -494,29 +586,5 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 
-  /* Demo Buttons */
-  demoContainer: {
-    marginTop: 28,
-    alignItems: "center",
-  },
-  demoTitle: {
-    fontSize: 12,
-    color: "#AAAAAA",
-    marginBottom: 12,
-  },
-  demoRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-  },
-  demoBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  demoBtnText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
-  },
+
 });

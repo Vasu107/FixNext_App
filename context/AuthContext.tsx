@@ -6,6 +6,7 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { authFetch } from "../src/api";
 
 // ─────────────────────────────────────────────
 // Types
@@ -17,6 +18,9 @@ export interface AuthUser {
   role: UserRole;
   name: string;
   phone: string;
+  email: string;        // email is always available (local or Google)
+  avatar?: string;      // Profile picture URL (Google users)
+  authProvider?: string; // "local" | "google"
 }
 
 interface AuthContextType {
@@ -27,7 +31,7 @@ interface AuthContextType {
   /** Indicates whether onboarding has been completed. */
   onboardingCompleted: boolean;
   /** Persist session and update state. Navigation handled by _layout.tsx. */
-  login: (role: UserRole, name?: string, phone?: string) => Promise<void>;
+  login: (role: UserRole, name?: string, phone?: string, email?: string, avatar?: string, authProvider?: string) => Promise<void>;
   /** Clear session state. Navigation handled by the caller. */
   logout: () => Promise<void>;
 }
@@ -37,10 +41,7 @@ interface AuthContextType {
 // ─────────────────────────────────────────────
 
 const KEYS = {
-  isLoggedIn: "isLoggedIn",
-  userRole: "userRole",
-  userName: "userProfile_fullName",
-  userPhone: "userProfile_phone",
+  token: "token",
   onboarding: "onboardingCompleted",
 } as const;
 
@@ -59,25 +60,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const rehydrate = async () => {
       try {
-        const [loggedIn, role, name, phone, onboarding] = await Promise.all([
-          AsyncStorage.getItem(KEYS.isLoggedIn),
-          AsyncStorage.getItem(KEYS.userRole),
-          AsyncStorage.getItem(KEYS.userName),
-          AsyncStorage.getItem(KEYS.userPhone),
-          AsyncStorage.getItem(KEYS.onboarding),
-        ]);
-
+        const onboarding = await AsyncStorage.getItem(KEYS.onboarding);
         setOnboardingCompleted(!!onboarding);
 
-        if (loggedIn === "true" && role) {
-          setUser({
-            role: role as UserRole,
-            name: name ?? "",
-            phone: phone ?? "",
-          });
+        const token = await AsyncStorage.getItem(KEYS.token);
+        if (token) {
+          const res = await authFetch('/auth/me');
+          if (res.user) {
+            setUser({
+              role: res.user.role as UserRole,
+              name: res.user.name,
+              phone: res.user.phone ?? "",
+              email: res.user.email ?? "",
+              avatar: res.user.avatar,
+              authProvider: res.user.authProvider,
+            });
+          }
         }
       } catch (e) {
         console.warn("[AuthContext] Failed to rehydrate session:", e);
+        // Token might be invalid, clear it
+        await AsyncStorage.removeItem(KEYS.token);
       } finally {
         setIsReady(true);
       }
@@ -90,28 +93,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (
     role: UserRole,
     name: string = "",
-    phone: string = ""
+    phone: string = "",
+    email: string = "",
+    avatar?: string,
+    authProvider: string = "local"
   ) => {
-    await AsyncStorage.multiSet([
-      [KEYS.isLoggedIn, "true"],
-      [KEYS.userRole, role],
-      [KEYS.userName, name],
-      [KEYS.userPhone, phone],
-      [KEYS.onboarding, "true"],
-    ]);
+    // The actual login API call will happen in the login/register screens,
+    // which will set the token in AsyncStorage. This method is just to update the state.
+    await AsyncStorage.setItem(KEYS.onboarding, "true");
     setOnboardingCompleted(true);
-    setUser({ role, name, phone });
+    setUser({ role, name, phone, email, avatar, authProvider });
   };
 
-  // ── Logout: clear session state ──
-  // Navigation is handled by the caller.
   const logout = async () => {
-    await AsyncStorage.multiRemove([
-      KEYS.isLoggedIn,
-      KEYS.userRole,
-      KEYS.userName,
-      KEYS.userPhone,
-    ]);
+    await AsyncStorage.removeItem(KEYS.token);
     setUser(null);
   };
 

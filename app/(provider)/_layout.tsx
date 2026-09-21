@@ -192,6 +192,15 @@ export default function TabLayout() {
             ),
           }}
         />
+
+        {/* HIDDEN SUB-PAGES */}
+        <Tabs.Screen
+          name="edit-profile"
+          options={{
+            href: null,
+            tabBarStyle: { display: "none" },
+          }}
+        />
       </Tabs>
     </SafeAreaView>
   );

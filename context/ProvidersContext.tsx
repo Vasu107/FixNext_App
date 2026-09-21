@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { authFetch } from "../src/api";
 
 export type ProviderData = {
   id: string;
@@ -120,7 +121,22 @@ const DEFAULT_PROVIDERS: ProviderData[] = [
 ];
 
 export function ProvidersProvider({ children }: { children: ReactNode }) {
-  const [providers, setProviders] = useState<ProviderData[]>(DEFAULT_PROVIDERS);
+  const [providers, setProviders] = useState<ProviderData[]>([]);
+
+  useEffect(() => {
+    fetchProviders();
+  }, []);
+
+  const fetchProviders = async () => {
+    try {
+      const data = await authFetch('/providers');
+      setProviders(data.providers || []);
+    } catch (error) {
+      console.log("[ProvidersContext] Error fetching providers:", error);
+      // Fallback to DEFAULT_PROVIDERS if API fails
+      setProviders(DEFAULT_PROVIDERS);
+    }
+  };
 
   const addProvider = (provider: ProviderData) => {
     setProviders((prev) => [provider, ...prev]);

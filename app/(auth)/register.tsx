@@ -20,6 +20,8 @@ import { useBookings } from "@/context/BookingsContext";
 import { useAuth } from "@/context/AuthContext";
 import { useProviders } from "@/context/ProvidersContext";
 import { useNotifications } from "@/context/NotificationsContext";
+import { BASE_URL } from "@/src/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
 const BLUE = "#0758C9";
@@ -35,13 +37,14 @@ export default function RegisterScreen() {
 
   const [role, setRole] = useState<Role>("customer");
   const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [categoryId, setCategoryId] = useState("1");
 
   const handleContinue = async () => {
     // Validation
-    if (!fullName.trim() || !phone.trim() || !password.trim()) {
+    if (!fullName.trim() || !email.trim() || !phone.trim() || !password.trim()) {
       Alert.alert("Error", "Please fill in all fields.");
       return;
     }
@@ -55,41 +58,40 @@ export default function RegisterScreen() {
     }
 
     try {
-      // Register provider
+      const endpoint = role === "provider" ? "/auth/register/provider" : "/auth/register/customer";
+      
+      const payload: any = {
+        name: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        password
+      };
+      
       if (role === "provider") {
-        const newProviderId = Date.now().toString();
-
-        addProvider({
-          id: newProviderId,
-          catId: categoryId,
-          name: fullName.trim(),
-          rating: 5.0,
-          reviews: 0,
-          experience: "New Pro",
-          startingAt: "₹199/hr",
-          verified: false,
-          image:
-            "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=400&auto=format&fit=crop",
-          coverImage:
-            "https://images.unsplash.com/photo-1581578731548-c64695cc6952?q=80&w=800&auto=format&fit=crop",
-          about:
-            "I'm a newly registered professional on FixNext, ready to help you with your needs!",
-          completedJobs: 0,
-          serviceCategories: [
-            {
-              icon: "star",
-              label: "General Service",
-            },
-          ],
-          reviews_list: [],
-        });
+        payload.bio = "I am a new professional on FixNext.";
+        payload.experience = "New Pro";
+        payload.city = "Unknown";
+        payload.categories = [categoryId];
       }
+
+      const response = await fetch(`${BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Registration failed");
+      }
+      
+      await AsyncStorage.setItem("token", data.token);
 
       // Save login session
       await login(
         role,
-        fullName.trim(),
-        phone.trim()
+        data.user.name,
+        data.user.phone || phone.trim()
       );
 
       // Navigate to dashboard
@@ -98,12 +100,12 @@ export default function RegisterScreen() {
       } else {
         router.replace("/(customer)" as any);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Registration error:", error);
 
       Alert.alert(
         "Error",
-        "Registration failed. Please try again."
+        error.message || "Registration failed. Please try again."
       );
     }
   };
@@ -284,6 +286,33 @@ export default function RegisterScreen() {
                   onChangeText={setFullName}
                   autoCapitalize="words"
                   autoCorrect={false}
+                />
+              </View>
+            </View>
+
+            {/* EMAIL */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.label}>
+                Email
+              </Text>
+
+              <View style={styles.inputWrapper}>
+                <Ionicons
+                  name="mail-outline"
+                  size={20}
+                  color="#888888"
+                  style={styles.inputIcon}
+                />
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="jane.doe@example.com"
+                  placeholderTextColor="#A0A0A0"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
                 />
               </View>
             </View>
